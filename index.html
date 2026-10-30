@@ -153,6 +153,22 @@
   .sheet-actions .btn { margin: 0; }
   .sheet-actions .btn.danger { flex: 0 0 96px; }
 
+  .cat-row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 9px 2px; background: none; border: 0; text-align: left; }
+  .cat-row + .cat-row { border-top: 1px solid var(--line); }
+  .cat-row .emoji { width: 36px; height: 36px; border-radius: 12px; background: #ffeef3; display: grid; place-items: center; font-size: 19px; flex: none; }
+  .cat-row .info { flex: 1; min-width: 0; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cat-row small { color: var(--muted); white-space: nowrap; }
+  .cat-row .chev { color: var(--muted); font-size: 18px; }
+  #catList { margin-bottom: 12px; }
+  .sheet h2 { font-size: 16px; margin: 0 0 12px; text-align: center; }
+  .sheet-label { font-size: 13px; color: var(--muted); margin: 0 0 6px 4px; }
+  .icon-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; max-height: 232px; overflow-y: auto; background: #fff; border-radius: 16px; padding: 8px; box-shadow: var(--shadow); margin-bottom: 14px; }
+  .icon-grid button { border: 2px solid transparent; background: none; border-radius: 12px; font-size: 24px; padding: 6px 0; line-height: 1.2; }
+  .icon-grid button.on { border-color: var(--pink); background: #ffeef3; }
+
+  .sync-banner { display: block; width: 100%; border: 0; border-radius: 14px; padding: 10px; margin-bottom: 12px; background: #ffeef3; color: var(--pink-dark); font-weight: 600; }
+  .sync-status { font-weight: 600; margin: 0 0 12px; }
+
   .toast { position: fixed; left: 50%; bottom: 150px; transform: translateX(-50%) translateY(20px); background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 12px; font-size: 14px; opacity: 0; transition: .2s; pointer-events: none; z-index: 20; max-width: calc(100% - 32px); text-align: center; }
   .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 </style>
@@ -177,6 +193,7 @@
   </section>
 
   <main>
+    <button class="sync-banner" id="syncBanner" hidden>☁️ Tap to sync with Google Drive</button>
     <section class="view active" id="view-records"></section>
 
     <section class="view" id="view-stats">
@@ -202,25 +219,30 @@
           <label for="currency">Currency symbol</label>
           <input id="currency" maxlength="4" autocomplete="off">
         </div>
-        <div class="row">
-          <label for="newCatName">Add category</label>
-          <div style="display:flex;gap:6px">
-            <input id="newCatEmoji" maxlength="4" placeholder="🎁" style="width:52px;text-align:center">
-            <input id="newCatName" maxlength="14" placeholder="Name" style="width:96px">
-          </div>
+      </div>
+      <div class="card">
+        <h2>🏷️ Categories</h2>
+        <div class="seg" id="catSeg">
+          <button data-type="expense" class="on">Expenses</button>
+          <button data-type="income">Income</button>
         </div>
-        <div class="row">
-          <label for="newCatType">…for</label>
-          <select id="newCatType"><option value="expense">Expenses</option><option value="income">Income</option></select>
-        </div>
+        <div id="catList"></div>
         <button class="btn ghost" id="addCat">Add category</button>
+        <p class="hint">Tap a category to rename it, change its icon or remove it.</p>
+      </div>
+      <div class="card">
+        <h2>☁️ Google Drive sync</h2>
+        <p class="sync-status" id="syncStatus"></p>
+        <button class="btn" id="syncBtn">Connect Google Drive</button>
+        <button class="btn ghost" id="syncOff" hidden>Disconnect</button>
+        <p class="hint">Sign in with the same Gmail on each phone to share your records. They are kept in a private app folder in your own Google Drive.</p>
       </div>
       <div class="card">
         <h2>💾 Backup</h2>
         <button class="btn ghost" id="importBtn">Import from CSV</button>
         <input type="file" id="importFile" accept=".csv,text/csv" hidden>
         <button class="btn danger" id="clearAll">Delete all records</button>
-        <p class="hint">Your data is stored only on this phone, never uploaded. Export a CSV now and then as a backup; importing a Pocket Penny CSV adds its records back.</p>
+        <p class="hint">Your data is stored on this phone, and in your own Google Drive only if you connect it. Export a CSV now and then as a backup; importing a Pocket Penny CSV adds its records back.</p>
       </div>
     </section>
   </main>
@@ -256,6 +278,20 @@
   </div>
 </form>
 
+<form class="sheet" id="catSheet" autocomplete="off">
+  <div class="grab"></div>
+  <h2 id="catSheetTitle">Add category</h2>
+  <div class="fields">
+    <div class="row"><label for="catName">Name</label><input id="catName" maxlength="14" placeholder="Category name"></div>
+  </div>
+  <p class="sheet-label">Choose an icon</p>
+  <div class="icon-grid" id="iconGrid"></div>
+  <div class="sheet-actions">
+    <button type="button" class="btn danger" id="catDelete" hidden>Remove</button>
+    <button type="submit" class="btn">Save</button>
+  </div>
+</form>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -270,20 +306,52 @@ const DEFAULT_CATS = [
   ['income', '💼', 'Salary'], ['income', '🎉', 'Bonus'], ['income', '📈', 'Investment'],
   ['income', '🧧', 'Gift'], ['income', '💰', 'Other'],
 ].map(([type, emoji, name], i) => ({ id: 'c' + i, type, emoji, name }));
+// Each type's "Other" catches records from removed categories, so it can't be removed itself.
+const FALLBACK_CAT = { expense: 'c15', income: 'c20' };
+const CATS_V2 = [
+  { id: 'c21', type: 'expense', emoji: '🧺', name: '家用' },
+  { id: 'c22', type: 'expense', emoji: '🧸', name: 'Kid' },
+];
+const ICONS = [
+  '🍜', '🍔', '🍕', '🍱', '🍣', '🍰', '🍎', '☕', '🧋', '🍺', '🛒', '🧺',
+  '🏠', '🛋️', '🧹', '💡', '💧', '🔥', '📱', '💻', '📺', '🌐', '🚌', '🚗',
+  '🏍️', '⛽', '🚕', '🚆', '✈️', '🏖️', '🏨', '🧳', '🛍️', '👕', '👟', '💄',
+  '💇', '💊', '🏥', '🦷', '🏋️', '⚽', '🎬', '🎮', '🎵', '🎨', '📚', '🎓',
+  '🧸', '👶', '🍼', '🎒', '🐾', '🌷', '🎁', '🧧', '💝', '💍', '🎉', '🙏',
+  '💼', '💰', '💵', '💳', '📈', '🏦', '🧾', '🛡️', '🔧', '📦', '🏷️', '⭐',
+];
 const COLORS = ['#ff8fab', '#ffc46b', '#7ec8e3', '#5cc8a6', '#b49cf0', '#f7a072', '#9ad0a0', '#e88ec9', '#8fa8ff', '#d4b483'];
 
 // ---------- storage ----------
+function insertCategory(list, cat) {
+  const i = list.findIndex(c => c.id === FALLBACK_CAT[cat.type]);
+  list.splice(i < 0 ? list.length : i, 0, cat);
+}
 function load() {
+  let d = null;
   try {
-    const d = JSON.parse(localStorage.getItem(STORE_KEY));
-    if (d && Array.isArray(d.tx)) return d;
+    const stored = JSON.parse(localStorage.getItem(STORE_KEY));
+    if (stored && Array.isArray(stored.tx)) d = stored;
   } catch (e) {}
-  return { currency: '$', categories: DEFAULT_CATS, tx: [] };
+  d = d || { currency: '$', categories: [...DEFAULT_CATS], tx: [] };
+  if ((d.catVersion || 0) < 2) {
+    CATS_V2.forEach(c => {
+      if (!d.categories.some(x => x.type === c.type && x.name.toLowerCase() === c.name.toLowerCase())) insertCategory(d.categories, c);
+    });
+    d.catVersion = 2;
+  }
+  d.deleted = d.deleted || {};
+  d.tx.forEach(t => { t.updated = t.updated || t.created || 0; });
+  return d;
 }
 let db = load();
-function save() {
+function persist() {
   try { localStorage.setItem(STORE_KEY, JSON.stringify(db)); }
   catch (e) { toast('Could not save — storage is full or blocked'); }
+}
+function save() {
+  persist();
+  scheduleSync();
 }
 
 // ---------- helpers ----------
@@ -310,6 +378,9 @@ let statType = 'expense';
 let editing = null; // id of tx being edited
 let formType = 'expense';
 let formCat = null;
+let catType = 'expense';
+let editingCat = null; // id of category being edited
+let catIcon = ICONS[0];
 
 const monthTx = () => db.tx.filter(t => t.date.startsWith(monthKey(viewMonth)));
 
@@ -326,6 +397,19 @@ function render() {
   renderRecords(txs);
   renderStats(txs);
   $('#currency').value = db.currency;
+  renderCatList();
+}
+
+function renderCatList() {
+  $('#catList').innerHTML = db.categories.filter(c => c.type === catType).map(c => {
+    const used = db.tx.filter(t => t.cat === c.id).length;
+    return `<button class="cat-row" data-id="${esc(c.id)}">
+      <span class="emoji">${esc(c.emoji)}</span>
+      <span class="info">${esc(c.name)}</span>
+      ${used ? `<small>${used} record${used === 1 ? '' : 's'}</small>` : ''}
+      <span class="chev">›</span>
+    </button>`;
+  }).join('');
 }
 
 function renderRecords(txs) {
@@ -421,6 +505,7 @@ function openSheet(tx) {
 }
 function closeSheet() {
   $('#sheet').classList.remove('open');
+  $('#catSheet').classList.remove('open');
   $('#sheetBg').classList.remove('open');
   document.activeElement.blur();
 }
@@ -435,8 +520,8 @@ $('#sheet').addEventListener('submit', e => {
   if (!cents) { toast('Please enter an amount'); $('#amount').focus(); return; }
   if (!formCat) { toast('Please pick a category'); return; }
   const data = { type: formType, cents, cat: formCat, date: $('#date').value || isoDate(new Date()), note: $('#note').value.trim() };
-  if (editing) Object.assign(db.tx.find(t => t.id === editing), data);
-  else db.tx.push({ id: uid(), created: Date.now(), ...data });
+  if (editing) Object.assign(db.tx.find(t => t.id === editing), data, { updated: Date.now() });
+  else db.tx.push({ id: uid(), created: Date.now(), updated: Date.now(), ...data });
   save();
   viewMonth = new Date(data.date + 'T00:00'); viewMonth.setDate(1);
   closeSheet();
@@ -446,6 +531,7 @@ $('#sheet').addEventListener('submit', e => {
 $('#deleteBtn').addEventListener('click', () => {
   if (!confirm('Delete this record?')) return;
   db.tx = db.tx.filter(t => t.id !== editing);
+  db.deleted[editing] = Date.now();
   save(); closeSheet(); render(); toast('Deleted');
 });
 $('#typeSeg').addEventListener('click', e => { const b = e.target.closest('button'); if (b) setFormType(b.dataset.type); });
@@ -475,18 +561,69 @@ $('#statSeg').addEventListener('click', e => {
 });
 
 // ---------- settings ----------
-$('#currency').addEventListener('change', e => { db.currency = e.target.value.trim() || '$'; save(); render(); });
-$('#addCat').addEventListener('click', () => {
-  const name = $('#newCatName').value.trim();
-  if (!name) { toast('Type a category name'); return; }
-  db.categories.push({ id: uid(), type: $('#newCatType').value, emoji: $('#newCatEmoji').value.trim() || '🏷️', name });
-  save();
-  $('#newCatName').value = $('#newCatEmoji').value = '';
-  toast(`Added “${name}”`);
+$('#currency').addEventListener('change', e => { db.currency = e.target.value.trim() || '$'; db.currencyUpdated = Date.now(); save(); render(); });
+function renderIcons() {
+  $('#iconGrid').innerHTML = ICONS.map(i => `<button type="button" class="${i === catIcon ? 'on' : ''}" data-icon="${i}">${i}</button>`).join('');
+}
+function openCatSheet(cat) {
+  editingCat = cat ? cat.id : null;
+  catIcon = cat ? cat.emoji : '🏷️';
+  if (!ICONS.includes(catIcon)) ICONS.unshift(catIcon); // keep icons chosen before the picker existed
+  $('#catSheetTitle').textContent = cat ? 'Edit category' : `Add ${catType} category`;
+  $('#catName').value = cat ? cat.name : '';
+  $('#catDelete').hidden = !cat || cat.id === FALLBACK_CAT[cat.type];
+  renderIcons();
+  $('#catSheet').classList.add('open');
+  $('#sheetBg').classList.add('open');
+}
+$('#catSeg').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  catType = b.dataset.type;
+  document.querySelectorAll('#catSeg button').forEach(x => x.classList.toggle('on', x === b));
+  renderCatList();
+});
+$('#catList').addEventListener('click', e => {
+  const b = e.target.closest('.cat-row');
+  if (b) openCatSheet(db.categories.find(c => c.id === b.dataset.id));
+});
+$('#addCat').addEventListener('click', () => openCatSheet());
+$('#iconGrid').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  catIcon = b.dataset.icon;
+  document.querySelectorAll('#iconGrid button').forEach(x => x.classList.toggle('on', x === b));
+});
+$('#catSheet').addEventListener('submit', e => {
+  e.preventDefault();
+  const name = $('#catName').value.trim();
+  if (!name) { toast('Type a category name'); $('#catName').focus(); return; }
+  const type = editingCat ? catById(editingCat).type : catType;
+  if (db.categories.some(c => c.type === type && c.id !== editingCat && c.name.toLowerCase() === name.toLowerCase())) {
+    toast(`You already have “${name}”`);
+    return;
+  }
+  if (editingCat) Object.assign(db.categories.find(c => c.id === editingCat), { name, emoji: catIcon, updated: Date.now() });
+  else insertCategory(db.categories, { id: uid(), type, emoji: catIcon, name, updated: Date.now() });
+  save(); closeSheet(); render();
+  toast(editingCat ? 'Category updated ✨' : `Added “${name}”`);
+});
+$('#catDelete').addEventListener('click', () => {
+  const cat = catById(editingCat);
+  const used = db.tx.filter(t => t.cat === cat.id);
+  const fallback = catById(FALLBACK_CAT[cat.type]);
+  const msg = used.length
+    ? `Remove “${cat.name}”? Its ${used.length} record${used.length === 1 ? '' : 's'} will move to “${fallback.name}”.`
+    : `Remove “${cat.name}”?`;
+  if (!confirm(msg)) return;
+  used.forEach(t => { t.cat = fallback.id; t.updated = Date.now(); });
+  db.categories = db.categories.filter(c => c.id !== cat.id);
+  db.deleted[cat.id] = Date.now();
+  save(); closeSheet(); render();
+  toast(`Removed “${cat.name}”`);
 });
 $('#clearAll').addEventListener('click', () => {
   if (!db.tx.length) { toast('Nothing to delete'); return; }
   if (!confirm(`Delete all ${db.tx.length} records? Export a CSV first if you want a backup.`)) return;
+  db.tx.forEach(t => { db.deleted[t.id] = Date.now(); });
   db.tx = []; save(); render(); toast('All records deleted');
 });
 
@@ -560,15 +697,168 @@ $('#importFile').addEventListener('change', async e => {
     const key = [date, type, cents, catName, note].join('|');
     if (seen.has(key)) { skipped++; return; }
     let cat = db.categories.find(c => c.type === type && c.name.toLowerCase() === catName.toLowerCase());
-    if (!cat) { cat = { id: uid(), type, emoji: '🏷️', name: catName }; db.categories.push(cat); }
-    db.tx.push({ id: uid(), created: Date.now() + added, type, cents, cat: cat.id, date, note });
+    if (!cat) { cat = { id: uid(), type, emoji: '🏷️', name: catName, updated: Date.now() }; db.categories.push(cat); }
+    db.tx.push({ id: uid(), created: Date.now() + added, updated: Date.now(), type, cents, cat: cat.id, date, note });
     seen.add(key); added++;
   });
   save(); render();
   toast(`Imported ${added} record${added === 1 ? '' : 's'}${skipped ? `, skipped ${skipped}` : ''}`);
 });
 
+// ---------- Google Drive sync ----------
+const GOOGLE_CLIENT_ID = ''; // OAuth client ID from Google Cloud; sync stays off until it is set
+const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
+const DRIVE_FILE = 'pocket-penny-data.json';
+const SYNC_KEY = 'pocketPenny.sync';
+let sync = {};
+try { sync = JSON.parse(localStorage.getItem(SYNC_KEY)) || {}; } catch (e) {}
+let syncRunning = false, syncAgain = false, syncTimer = null, syncError = '', tokenClient = null;
+
+function persistSync() {
+  try { localStorage.setItem(SYNC_KEY, JSON.stringify(sync)); } catch (e) {}
+}
+const tokenValid = () => !!sync.token && sync.expires > Date.now() + 60000;
+
+// Newest version of each item wins; a delete wins unless the item was edited after it.
+function mergeList(a, b, deleted) {
+  const items = new Map();
+  [...a, ...b].forEach(x => {
+    const cur = items.get(x.id);
+    if (!cur || (x.updated || 0) > (cur.updated || 0)) items.set(x.id, x);
+  });
+  return [...items.values()].filter(x => !(deleted[x.id] >= (x.updated || 0)));
+}
+function mergeDb(local, remote) {
+  const deleted = { ...local.deleted };
+  Object.entries(remote.deleted || {}).forEach(([id, at]) => { deleted[id] = Math.max(deleted[id] || 0, at); });
+  const cats = mergeList(local.categories, remote.categories || [], deleted);
+  const categories = local.categories.map(c => cats.find(x => x.id === c.id)).filter(Boolean);
+  cats.filter(c => !categories.includes(c)).forEach(c => insertCategory(categories, c));
+  const tx = mergeList(local.tx, remote.tx || [], deleted);
+  tx.forEach(t => { if (!categories.some(c => c.id === t.cat)) t.cat = FALLBACK_CAT[t.type]; });
+  const remoteCurrency = (remote.currencyUpdated || 0) > (local.currencyUpdated || 0);
+  return {
+    ...local, categories, tx, deleted,
+    currency: remoteCurrency ? remote.currency : local.currency,
+    currencyUpdated: Math.max(local.currencyUpdated || 0, remote.currencyUpdated || 0),
+  };
+}
+
+async function drive(url, options = {}) {
+  const res = await fetch(url, { ...options, headers: { Authorization: 'Bearer ' + sync.token, ...options.headers } });
+  if (res.status === 401) { sync.token = ''; persistSync(); throw new Error('sign-in expired'); }
+  if (!res.ok) throw new Error('Drive error ' + res.status);
+  return res;
+}
+async function findDriveFile() {
+  const q = encodeURIComponent(`name='${DRIVE_FILE}'`);
+  const res = await drive(`https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=${q}&fields=files(id)`);
+  return (await res.json()).files[0];
+}
+async function uploadDriveFile(fileId, body) {
+  if (fileId) {
+    await drive(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body });
+    return;
+  }
+  const form = new FormData();
+  form.append('metadata', new Blob([JSON.stringify({ name: DRIVE_FILE, parents: ['appDataFolder'] })], { type: 'application/json' }));
+  form.append('file', new Blob([body], { type: 'application/json' }));
+  await drive('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', { method: 'POST', body: form });
+}
+async function syncNow() {
+  if (syncRunning) { syncAgain = true; return; }
+  if (!tokenValid()) { renderSync(); return; }
+  syncRunning = true;
+  syncError = '';
+  renderSync();
+  try {
+    const file = await findDriveFile();
+    let remoteText = '';
+    if (file) {
+      remoteText = await (await drive(`https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`)).text();
+      const remote = JSON.parse(remoteText);
+      if (!Array.isArray(remote.tx)) throw new Error('unreadable Drive data');
+      db = mergeDb(db, remote);
+      persist();
+      render();
+    }
+    const body = JSON.stringify(db);
+    if (body !== remoteText) await uploadDriveFile(file && file.id, body);
+    sync.last = Date.now();
+    persistSync();
+  } catch (e) {
+    syncError = e.message;
+  }
+  syncRunning = false;
+  renderSync();
+  if (syncAgain) { syncAgain = false; syncNow(); }
+}
+function scheduleSync() {
+  if (!sync.connected || !tokenValid()) return;
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(syncNow, 1500);
+}
+
+function renderSync() {
+  const configured = !!GOOGLE_CLIENT_ID;
+  const expired = !!sync.connected && !tokenValid();
+  let status = 'Not connected';
+  if (!configured) status = 'Not set up yet';
+  else if (syncRunning) status = 'Syncing…';
+  else if (syncError) status = `Could not sync: ${syncError}`;
+  else if (expired) status = 'Tap Sync now to sign in again';
+  else if (sync.connected && sync.last) status = 'Last synced ' + new Date(sync.last).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  $('#syncStatus').textContent = status;
+  $('#syncBtn').hidden = !configured;
+  $('#syncBtn').textContent = sync.connected ? 'Sync now' : 'Connect Google Drive';
+  $('#syncOff').hidden = !configured || !sync.connected;
+  $('#syncBanner').hidden = !configured || !expired;
+}
+
+function requestToken() {
+  if (!window.google || !google.accounts) { toast('Google sign-in is not ready. Check your internet and try again.'); return; }
+  if (!tokenClient) {
+    tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: GOOGLE_CLIENT_ID,
+      scope: DRIVE_SCOPE,
+      callback: res => {
+        if (res.error) { syncError = res.error; renderSync(); return; }
+        Object.assign(sync, { connected: true, token: res.access_token, expires: Date.now() + res.expires_in * 1000 });
+        persistSync();
+        syncNow();
+      },
+      error_callback: err => { syncError = err.message || 'sign-in was cancelled'; renderSync(); },
+    });
+  }
+  tokenClient.requestAccessToken({ prompt: sync.connected ? '' : 'consent' });
+}
+function startSync() {
+  if (tokenValid()) syncNow();
+  else requestToken();
+}
+$('#syncBtn').addEventListener('click', startSync);
+$('#syncBanner').addEventListener('click', startSync);
+$('#syncOff').addEventListener('click', () => {
+  if (!confirm('Disconnect Google Drive? Your records stay on this phone and in Drive, but stop syncing.')) return;
+  if (sync.token && window.google && google.accounts) google.accounts.oauth2.revoke(sync.token, () => {});
+  sync = {};
+  persistSync();
+  renderSync();
+});
+document.addEventListener('visibilitychange', () => { if (!document.hidden && sync.connected) syncNow(); });
+window.addEventListener('online', () => { if (sync.connected) syncNow(); });
+
+if (GOOGLE_CLIENT_ID) {
+  const gis = document.createElement('script');
+  gis.src = 'https://accounts.google.com/gsi/client';
+  gis.async = true;
+  document.head.appendChild(gis);
+}
+
+persist();
 render();
+renderSync();
+if (sync.connected) syncNow();
 
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});

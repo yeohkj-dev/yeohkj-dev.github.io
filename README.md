@@ -10,8 +10,9 @@ and exports your records to CSV. No account, no ads, data stays on your phone.
 - Stats tab: donut chart and per-category breakdown
 - Export to CSV (this month, or everything) – save to Downloads or share to Drive / email / WhatsApp
 - Import a Pocket Penny CSV back (backup restore; duplicates are skipped)
-- Custom categories and currency symbol
+- Manage categories: add, rename, change icon, remove; set your currency symbol
 - Works fully offline after the first load
+- Optional Google Drive sync between phones (private app folder in your own Drive)
 
 CSV columns: `Date, Type, Category, Amount, Currency, Note` (UTF-8, opens in Excel and Google Sheets).
 
