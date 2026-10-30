@@ -1,0 +1,578 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ff8fab">
+<meta name="description" content="Cute, simple expense tracker with CSV export. Works offline.">
+<title>Pocket Penny</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png?v=3">
+<link rel="apple-touch-icon" href="icons/icon-192.png?v=3">
+<style>
+  :root {
+    --bg: #fff7fa;
+    --card: #ffffff;
+    --ink: #3d2c3a;
+    --muted: #9a8595;
+    --line: #f6dbe5;
+    --pink: #ff8fab;
+    --pink-dark: #e86b8c;
+    --mint: #5cc8a6;
+    --red: #ef6f6f;
+    --shadow: 0 6px 18px rgba(232, 107, 140, 0.12);
+    --radius: 18px;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 15px;
+  }
+  button, input, select { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+
+  .app { max-width: 520px; margin: 0 auto; min-height: 100%; padding-bottom: 96px; }
+
+  header {
+    background: linear-gradient(160deg, #ffb3c6, var(--pink));
+    color: #fff;
+    padding: calc(14px + env(safe-area-inset-top)) 16px 64px;
+    border-radius: 0 0 28px 28px;
+  }
+  .title-row { display: flex; align-items: center; justify-content: space-between; }
+  .title-row h1 { font-size: 20px; margin: 0; letter-spacing: .3px; }
+  .month-nav { display: flex; align-items: center; gap: 4px; }
+  .month-nav button {
+    background: rgba(255,255,255,.25); border: 0; color: #fff;
+    width: 32px; height: 32px; border-radius: 50%; font-size: 18px; line-height: 1;
+  }
+  .month-nav span { min-width: 92px; text-align: center; font-weight: 600; }
+
+  .summary {
+    margin: -48px 16px 0;
+    background: var(--card);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    display: grid; grid-template-columns: repeat(3, 1fr);
+    padding: 14px 8px;
+    text-align: center;
+  }
+  .summary div small { display: block; color: var(--muted); font-size: 12px; margin-bottom: 4px; }
+  .summary b { font-size: 16px; word-break: break-all; }
+  .exp { color: var(--red); }
+  .inc { color: var(--mint); }
+
+  main { padding: 12px 16px 0; }
+  .view { display: none; }
+  .view.active { display: block; }
+
+  .day { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); margin-bottom: 12px; overflow: hidden; }
+  .day-head { display: flex; justify-content: space-between; padding: 10px 14px; font-size: 13px; color: var(--muted); border-bottom: 1px solid var(--line); }
+  .tx { display: flex; align-items: center; gap: 12px; padding: 10px 14px; width: 100%; background: none; border: 0; text-align: left; }
+  .tx + .tx { border-top: 1px solid var(--line); }
+  .tx .emoji { width: 38px; height: 38px; border-radius: 12px; background: #ffeef3; display: grid; place-items: center; font-size: 20px; flex: none; }
+  .tx .info { flex: 1; min-width: 0; }
+  .tx .info b { display: block; font-weight: 600; }
+  .tx .info small { color: var(--muted); display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tx .amt { font-weight: 700; white-space: nowrap; }
+
+  .empty { text-align: center; color: var(--muted); padding: 48px 16px; }
+  .empty div { font-size: 48px; margin-bottom: 8px; }
+
+  .card { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 16px; margin-bottom: 12px; }
+  .card h2 { font-size: 15px; margin: 0 0 12px; }
+
+  .seg { display: flex; background: #ffeef3; border-radius: 12px; padding: 4px; margin-bottom: 14px; }
+  .seg button { flex: 1; border: 0; background: none; padding: 8px; border-radius: 9px; font-weight: 600; color: var(--muted); }
+  .seg button.on { background: #fff; color: var(--pink-dark); box-shadow: 0 2px 6px rgba(0,0,0,.06); }
+
+  .donut-wrap { display: grid; place-items: center; position: relative; margin: 4px 0 14px; }
+  .donut-wrap .center { position: absolute; text-align: center; }
+  .donut-wrap .center small { color: var(--muted); display: block; font-size: 12px; }
+  .bar-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; }
+  .bar-row + .bar-row { border-top: 1px solid var(--line); }
+  .bar-row .emoji { font-size: 20px; width: 28px; text-align: center; }
+  .bar-row .mid { flex: 1; min-width: 0; }
+  .bar-row .top { display: flex; justify-content: space-between; font-size: 14px; margin-bottom: 5px; }
+  .bar { height: 7px; background: #ffeef3; border-radius: 4px; overflow: hidden; }
+  .bar i { display: block; height: 100%; border-radius: 4px; }
+
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; }
+  .row + .row { border-top: 1px solid var(--line); }
+  .row label { font-weight: 500; }
+  .row input, .row select { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; background: #fff; max-width: 160px; }
+  .btn { display: block; width: 100%; border: 0; border-radius: 14px; padding: 13px; font-weight: 700; background: var(--pink); color: #fff; }
+  .btn.ghost { background: #ffeef3; color: var(--pink-dark); }
+  .btn.danger { background: #fdeaea; color: var(--red); }
+  .btn + .btn { margin-top: 10px; }
+  .hint { color: var(--muted); font-size: 13px; margin: 10px 0 0; line-height: 1.45; }
+
+  nav.tabs {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    background: var(--card); border-top: 1px solid var(--line);
+    display: flex; justify-content: space-around;
+    padding: 6px 0 calc(6px + env(safe-area-inset-bottom));
+    z-index: 5;
+  }
+  nav.tabs button { background: none; border: 0; display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 12px; color: var(--muted); width: 72px; padding: 4px; }
+  nav.tabs button span { font-size: 22px; filter: grayscale(1); opacity: .6; }
+  nav.tabs button.on { color: var(--pink-dark); font-weight: 600; }
+  nav.tabs button.on span { filter: none; opacity: 1; }
+  .fab {
+    position: fixed; right: max(16px, calc(50% - 244px)); bottom: calc(76px + env(safe-area-inset-bottom));
+    width: 60px; height: 60px; border-radius: 50%; border: 0;
+    background: var(--pink); color: #fff; font-size: 32px; line-height: 1;
+    box-shadow: 0 8px 20px rgba(232,107,140,.45); z-index: 6;
+  }
+
+  .sheet-bg { position: fixed; inset: 0; background: rgba(61,44,58,.35); opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 10; }
+  .sheet-bg.open { opacity: 1; pointer-events: auto; }
+  .sheet {
+    position: fixed; left: 0; right: 0; bottom: 0; max-width: 520px; margin: 0 auto;
+    background: var(--bg); border-radius: 24px 24px 0 0;
+    padding: 10px 16px calc(16px + env(safe-area-inset-bottom));
+    transform: translateY(105%); transition: transform .25s ease; z-index: 11;
+    max-height: 92vh; overflow-y: auto;
+  }
+  .sheet.open { transform: translateY(0); }
+  .grab { width: 40px; height: 5px; border-radius: 3px; background: var(--line); margin: 0 auto 12px; }
+  .amount-box { display: flex; align-items: baseline; gap: 6px; background: #fff; border-radius: 16px; padding: 10px 14px; box-shadow: var(--shadow); margin-bottom: 14px; }
+  .amount-box span { color: var(--muted); font-size: 20px; }
+  .amount-box input { border: 0; outline: none; font-size: 30px; font-weight: 700; width: 100%; background: none; }
+  .cats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 14px; }
+  .cat { border: 2px solid transparent; background: #fff; border-radius: 14px; padding: 8px 2px; display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 12px; }
+  .cat span { font-size: 22px; }
+  .cat.on { border-color: var(--pink); background: #ffeef3; }
+  .fields { background: #fff; border-radius: 16px; padding: 2px 14px; box-shadow: var(--shadow); margin-bottom: 14px; }
+  .fields .row input { max-width: none; flex: 1; text-align: right; border: 0; padding: 6px 0; }
+  .sheet-actions { display: flex; gap: 10px; }
+  .sheet-actions .btn { margin: 0; }
+  .sheet-actions .btn.danger { flex: 0 0 96px; }
+
+  .toast { position: fixed; left: 50%; bottom: 150px; transform: translateX(-50%) translateY(20px); background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 12px; font-size: 14px; opacity: 0; transition: .2s; pointer-events: none; z-index: 20; max-width: calc(100% - 32px); text-align: center; }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="title-row">
+      <h1>🐻 Pocket Penny</h1>
+      <div class="month-nav">
+        <button id="prevMonth" aria-label="Previous month">‹</button>
+        <span id="monthLabel"></span>
+        <button id="nextMonth" aria-label="Next month">›</button>
+      </div>
+    </div>
+  </header>
+
+  <section class="summary">
+    <div><small>Expenses</small><b class="exp" id="sumExp">0</b></div>
+    <div><small>Income</small><b class="inc" id="sumInc">0</b></div>
+    <div><small>Balance</small><b id="sumBal">0</b></div>
+  </section>
+
+  <main>
+    <section class="view active" id="view-records"></section>
+
+    <section class="view" id="view-stats">
+      <div class="card">
+        <div class="seg" id="statSeg">
+          <button data-type="expense" class="on">Expenses</button>
+          <button data-type="income">Income</button>
+        </div>
+        <div id="statsBody"></div>
+      </div>
+    </section>
+
+    <section class="view" id="view-settings">
+      <div class="card">
+        <h2>📤 Export to CSV</h2>
+        <button class="btn" id="exportMonth">Export this month</button>
+        <button class="btn ghost" id="exportAll">Export all records</button>
+        <p class="hint">The file opens in Excel, Google Sheets or Numbers. On Android it is saved to your Downloads folder; if sharing is available you can also send it to Drive, email or WhatsApp.</p>
+      </div>
+      <div class="card">
+        <h2>⚙️ Settings</h2>
+        <div class="row">
+          <label for="currency">Currency symbol</label>
+          <input id="currency" maxlength="4" autocomplete="off">
+        </div>
+        <div class="row">
+          <label for="newCatName">Add category</label>
+          <div style="display:flex;gap:6px">
+            <input id="newCatEmoji" maxlength="4" placeholder="🎁" style="width:52px;text-align:center">
+            <input id="newCatName" maxlength="14" placeholder="Name" style="width:96px">
+          </div>
+        </div>
+        <div class="row">
+          <label for="newCatType">…for</label>
+          <select id="newCatType"><option value="expense">Expenses</option><option value="income">Income</option></select>
+        </div>
+        <button class="btn ghost" id="addCat">Add category</button>
+      </div>
+      <div class="card">
+        <h2>💾 Backup</h2>
+        <button class="btn ghost" id="importBtn">Import from CSV</button>
+        <input type="file" id="importFile" accept=".csv,text/csv" hidden>
+        <button class="btn danger" id="clearAll">Delete all records</button>
+        <p class="hint">Your data is stored only on this phone, never uploaded. Export a CSV now and then as a backup; importing a Pocket Penny CSV adds its records back.</p>
+      </div>
+    </section>
+  </main>
+</div>
+
+<button class="fab" id="fab" aria-label="Add record">+</button>
+
+<nav class="tabs">
+  <button data-view="records" class="on"><span>📒</span>Records</button>
+  <button data-view="stats"><span>📊</span>Stats</button>
+  <button data-view="settings"><span>⚙️</span>Settings</button>
+</nav>
+
+<div class="sheet-bg" id="sheetBg"></div>
+<form class="sheet" id="sheet" autocomplete="off">
+  <div class="grab"></div>
+  <div class="seg" id="typeSeg">
+    <button type="button" data-type="expense" class="on">Expense</button>
+    <button type="button" data-type="income">Income</button>
+  </div>
+  <div class="amount-box">
+    <span id="curSym"></span>
+    <input id="amount" inputmode="decimal" placeholder="0.00" required>
+  </div>
+  <div class="cats" id="cats"></div>
+  <div class="fields">
+    <div class="row"><label for="date">Date</label><input type="date" id="date" required></div>
+    <div class="row"><label for="note">Note</label><input id="note" maxlength="80" placeholder="Optional"></div>
+  </div>
+  <div class="sheet-actions">
+    <button type="button" class="btn danger" id="deleteBtn" hidden>Delete</button>
+    <button type="submit" class="btn">Save</button>
+  </div>
+</form>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const STORE_KEY = 'pocketPenny.v1';
+const DEFAULT_CATS = [
+  ['expense', '🍜', 'Food'], ['expense', '☕', 'Drinks'], ['expense', '🛒', 'Groceries'],
+  ['expense', '🚌', 'Transport'], ['expense', '⛽', 'Fuel'], ['expense', '🛍️', 'Shopping'],
+  ['expense', '🏠', 'Housing'], ['expense', '💡', 'Bills'], ['expense', '📱', 'Phone'],
+  ['expense', '🎬', 'Fun'], ['expense', '💊', 'Health'], ['expense', '📚', 'Education'],
+  ['expense', '✈️', 'Travel'], ['expense', '🎁', 'Gifts'], ['expense', '🐾', 'Pets'],
+  ['expense', '📦', 'Other'],
+  ['income', '💼', 'Salary'], ['income', '🎉', 'Bonus'], ['income', '📈', 'Investment'],
+  ['income', '🧧', 'Gift'], ['income', '💰', 'Other'],
+].map(([type, emoji, name], i) => ({ id: 'c' + i, type, emoji, name }));
+const COLORS = ['#ff8fab', '#ffc46b', '#7ec8e3', '#5cc8a6', '#b49cf0', '#f7a072', '#9ad0a0', '#e88ec9', '#8fa8ff', '#d4b483'];
+
+// ---------- storage ----------
+function load() {
+  try {
+    const d = JSON.parse(localStorage.getItem(STORE_KEY));
+    if (d && Array.isArray(d.tx)) return d;
+  } catch (e) {}
+  return { currency: '$', categories: DEFAULT_CATS, tx: [] };
+}
+let db = load();
+function save() {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(db)); }
+  catch (e) { toast('Could not save — storage is full or blocked'); }
+}
+
+// ---------- helpers ----------
+const $ = s => document.querySelector(s);
+const pad = n => String(n).padStart(2, '0');
+const isoDate = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const monthKey = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const catById = id => db.categories.find(c => c.id === id) || { emoji: '❓', name: 'Unknown', type: 'expense' };
+const fmtNum = cents => (cents / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const money = cents => db.currency + fmtNum(cents);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+function toast(msg) {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => t.classList.remove('show'), 2400);
+}
+
+// ---------- state ----------
+let viewMonth = new Date(); viewMonth.setDate(1);
+let statType = 'expense';
+let editing = null; // id of tx being edited
+let formType = 'expense';
+let formCat = null;
+
+const monthTx = () => db.tx.filter(t => t.date.startsWith(monthKey(viewMonth)));
+
+// ---------- render ----------
+function render() {
+  $('#monthLabel').textContent = viewMonth.toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
+  const txs = monthTx();
+  const exp = txs.filter(t => t.type === 'expense').reduce((s, t) => s + t.cents, 0);
+  const inc = txs.filter(t => t.type === 'income').reduce((s, t) => s + t.cents, 0);
+  $('#sumExp').textContent = money(exp);
+  $('#sumInc').textContent = money(inc);
+  $('#sumBal').textContent = (inc - exp < 0 ? '-' : '') + money(Math.abs(inc - exp));
+  $('#sumBal').className = inc - exp < 0 ? 'exp' : '';
+  renderRecords(txs);
+  renderStats(txs);
+  $('#currency').value = db.currency;
+}
+
+function renderRecords(txs) {
+  const el = $('#view-records');
+  if (!txs.length) {
+    el.innerHTML = `<div class="empty"><div>🐻</div>No records this month.<br>Tap <b>+</b> to add your first one!</div>`;
+    return;
+  }
+  const byDay = {};
+  txs.forEach(t => (byDay[t.date] ||= []).push(t));
+  el.innerHTML = Object.keys(byDay).sort().reverse().map(day => {
+    const list = byDay[day].sort((a, b) => b.created - a.created);
+    const net = list.reduce((s, t) => s + (t.type === 'income' ? t.cents : -t.cents), 0);
+    const label = new Date(day + 'T00:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+    return `<div class="day">
+      <div class="day-head"><span>${label}</span><span>${net < 0 ? '-' : '+'}${money(Math.abs(net))}</span></div>
+      ${list.map(t => {
+        const c = catById(t.cat);
+        return `<button class="tx" data-id="${t.id}">
+          <span class="emoji">${esc(c.emoji)}</span>
+          <span class="info"><b>${esc(c.name)}</b>${t.note ? `<small>${esc(t.note)}</small>` : ''}</span>
+          <span class="amt ${t.type === 'income' ? 'inc' : 'exp'}">${t.type === 'income' ? '+' : '-'}${money(t.cents)}</span>
+        </button>`;
+      }).join('')}
+    </div>`;
+  }).join('');
+}
+
+function renderStats(txs) {
+  const list = txs.filter(t => t.type === statType);
+  const total = list.reduce((s, t) => s + t.cents, 0);
+  const el = $('#statsBody');
+  if (!total) {
+    el.innerHTML = `<div class="empty"><div>📊</div>No ${statType === 'expense' ? 'expenses' : 'income'} this month.</div>`;
+    return;
+  }
+  const sums = {};
+  list.forEach(t => sums[t.cat] = (sums[t.cat] || 0) + t.cents);
+  const rows = Object.entries(sums).sort((a, b) => b[1] - a[1]);
+  // donut
+  const R = 70, C = 2 * Math.PI * R;
+  let offset = 0;
+  const arcs = rows.map(([, v], i) => {
+    const len = v / total * C;
+    const arc = `<circle r="${R}" cx="90" cy="90" fill="none" stroke="${COLORS[i % COLORS.length]}" stroke-width="26"
+      stroke-dasharray="${len} ${C - len}" stroke-dashoffset="${-offset}" transform="rotate(-90 90 90)"/>`;
+    offset += len;
+    return arc;
+  }).join('');
+  el.innerHTML = `
+    <div class="donut-wrap">
+      <svg width="180" height="180" viewBox="0 0 180 180">${arcs}</svg>
+      <div class="center"><small>Total</small><b>${money(total)}</b></div>
+    </div>
+    ${rows.map(([id, v], i) => {
+      const c = catById(id), pct = v / total * 100;
+      return `<div class="bar-row">
+        <span class="emoji">${esc(c.emoji)}</span>
+        <div class="mid">
+          <div class="top"><span>${esc(c.name)} · ${pct.toFixed(1)}%</span><b>${money(v)}</b></div>
+          <div class="bar"><i style="width:${pct}%;background:${COLORS[i % COLORS.length]}"></i></div>
+        </div>
+      </div>`;
+    }).join('')}`;
+}
+
+function renderCats() {
+  $('#cats').innerHTML = db.categories.filter(c => c.type === formType).map(c =>
+    `<button type="button" class="cat ${c.id === formCat ? 'on' : ''}" data-id="${c.id}"><span>${esc(c.emoji)}</span>${esc(c.name)}</button>`
+  ).join('');
+}
+
+// ---------- add / edit sheet ----------
+function setFormType(type) {
+  formType = type;
+  document.querySelectorAll('#typeSeg button').forEach(b => b.classList.toggle('on', b.dataset.type === type));
+  if (!formCat || catById(formCat).type !== type) formCat = db.categories.find(c => c.type === type)?.id;
+  renderCats();
+}
+function openSheet(tx) {
+  editing = tx ? tx.id : null;
+  formCat = tx ? tx.cat : null;
+  setFormType(tx ? tx.type : 'expense');
+  $('#curSym').textContent = db.currency;
+  $('#amount').value = tx ? (tx.cents / 100).toFixed(2) : '';
+  const today = new Date();
+  $('#date').value = tx ? tx.date : (monthKey(viewMonth) === monthKey(today) ? isoDate(today) : monthKey(viewMonth) + '-01');
+  $('#note').value = tx ? tx.note : '';
+  $('#deleteBtn').hidden = !tx;
+  $('#sheet').classList.add('open');
+  $('#sheetBg').classList.add('open');
+  if (!tx) setTimeout(() => $('#amount').focus(), 260);
+}
+function closeSheet() {
+  $('#sheet').classList.remove('open');
+  $('#sheetBg').classList.remove('open');
+  document.activeElement.blur();
+}
+function parseAmount(s) {
+  const n = parseFloat(String(s).replace(/[^\d.,-]/g, '').replace(',', '.'));
+  return isFinite(n) ? Math.round(Math.abs(n) * 100) : 0;
+}
+
+$('#sheet').addEventListener('submit', e => {
+  e.preventDefault();
+  const cents = parseAmount($('#amount').value);
+  if (!cents) { toast('Please enter an amount'); $('#amount').focus(); return; }
+  if (!formCat) { toast('Please pick a category'); return; }
+  const data = { type: formType, cents, cat: formCat, date: $('#date').value || isoDate(new Date()), note: $('#note').value.trim() };
+  if (editing) Object.assign(db.tx.find(t => t.id === editing), data);
+  else db.tx.push({ id: uid(), created: Date.now(), ...data });
+  save();
+  viewMonth = new Date(data.date + 'T00:00'); viewMonth.setDate(1);
+  closeSheet();
+  render();
+  toast(editing ? 'Updated ✨' : 'Saved ✨');
+});
+$('#deleteBtn').addEventListener('click', () => {
+  if (!confirm('Delete this record?')) return;
+  db.tx = db.tx.filter(t => t.id !== editing);
+  save(); closeSheet(); render(); toast('Deleted');
+});
+$('#typeSeg').addEventListener('click', e => { const b = e.target.closest('button'); if (b) setFormType(b.dataset.type); });
+$('#cats').addEventListener('click', e => { const b = e.target.closest('.cat'); if (b) { formCat = b.dataset.id; renderCats(); } });
+$('#fab').addEventListener('click', () => openSheet());
+$('#sheetBg').addEventListener('click', closeSheet);
+$('#view-records').addEventListener('click', e => {
+  const b = e.target.closest('.tx');
+  if (b) openSheet(db.tx.find(t => t.id === b.dataset.id));
+});
+
+// ---------- navigation ----------
+document.querySelector('nav.tabs').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  document.querySelectorAll('nav.tabs button').forEach(x => x.classList.toggle('on', x === b));
+  document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + b.dataset.view));
+  $('#fab').hidden = b.dataset.view === 'settings';
+  window.scrollTo(0, 0);
+});
+$('#prevMonth').addEventListener('click', () => { viewMonth.setMonth(viewMonth.getMonth() - 1); render(); });
+$('#nextMonth').addEventListener('click', () => { viewMonth.setMonth(viewMonth.getMonth() + 1); render(); });
+$('#statSeg').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  statType = b.dataset.type;
+  document.querySelectorAll('#statSeg button').forEach(x => x.classList.toggle('on', x === b));
+  renderStats(monthTx());
+});
+
+// ---------- settings ----------
+$('#currency').addEventListener('change', e => { db.currency = e.target.value.trim() || '$'; save(); render(); });
+$('#addCat').addEventListener('click', () => {
+  const name = $('#newCatName').value.trim();
+  if (!name) { toast('Type a category name'); return; }
+  db.categories.push({ id: uid(), type: $('#newCatType').value, emoji: $('#newCatEmoji').value.trim() || '🏷️', name });
+  save();
+  $('#newCatName').value = $('#newCatEmoji').value = '';
+  toast(`Added “${name}”`);
+});
+$('#clearAll').addEventListener('click', () => {
+  if (!db.tx.length) { toast('Nothing to delete'); return; }
+  if (!confirm(`Delete all ${db.tx.length} records? Export a CSV first if you want a backup.`)) return;
+  db.tx = []; save(); render(); toast('All records deleted');
+});
+
+// ---------- CSV export ----------
+const CSV_HEADER = ['Date', 'Type', 'Category', 'Amount', 'Currency', 'Note'];
+const csvCell = v => /[",\n\r]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v);
+
+function buildCsv(txs) {
+  const rows = [...txs].sort((a, b) => a.date.localeCompare(b.date) || a.created - b.created).map(t => {
+    const c = catById(t.cat);
+    return [t.date, t.type === 'income' ? 'Income' : 'Expense', c.name, (t.cents / 100).toFixed(2), db.currency, t.note || ''];
+  });
+  return '﻿' + [CSV_HEADER, ...rows].map(r => r.map(csvCell).join(',')).join('\r\n');
+}
+
+async function exportCsv(txs, filename) {
+  if (!txs.length) { toast('No records to export'); return; }
+  const blob = new Blob([buildCsv(txs)], { type: 'text/csv;charset=utf-8' });
+  const file = new File([blob], filename, { type: 'text/csv' });
+  if (navigator.canShare && navigator.canShare({ files: [file] }) && confirm('Share the CSV (Drive, email, WhatsApp…)?\nPress Cancel to save it to Downloads instead.')) {
+    try { await navigator.share({ files: [file], title: filename }); return; }
+    catch (e) { if (e.name === 'AbortError') return; }
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  toast(`Saved ${filename} (${txs.length} records)`);
+}
+$('#exportMonth').addEventListener('click', () => exportCsv(monthTx(), `expenses-${monthKey(viewMonth)}.csv`));
+$('#exportAll').addEventListener('click', () => exportCsv(db.tx, `expenses-all-${isoDate(new Date())}.csv`));
+
+// ---------- CSV import ----------
+function parseCsv(text) {
+  const rows = []; let row = [], cell = '', q = false;
+  text = text.replace(/^﻿/, '');
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (q) {
+      if (ch === '"' && text[i + 1] === '"') { cell += '"'; i++; }
+      else if (ch === '"') q = false;
+      else cell += ch;
+    } else if (ch === '"') q = true;
+    else if (ch === ',') { row.push(cell); cell = ''; }
+    else if (ch === '\n' || ch === '\r') {
+      if (ch === '\r' && text[i + 1] === '\n') i++;
+      row.push(cell); rows.push(row); row = []; cell = '';
+    } else cell += ch;
+  }
+  if (cell || row.length) { row.push(cell); rows.push(row); }
+  return rows.filter(r => r.some(c => c.trim()));
+}
+$('#importBtn').addEventListener('click', () => $('#importFile').click());
+$('#importFile').addEventListener('change', async e => {
+  const f = e.target.files[0]; e.target.value = '';
+  if (!f) return;
+  const rows = parseCsv(await f.text());
+  const head = (rows.shift() || []).map(h => h.trim().toLowerCase());
+  const col = n => head.indexOf(n);
+  if (col('date') < 0 || col('amount') < 0) { toast('Not a Pocket Penny CSV (needs Date and Amount columns)'); return; }
+  const seen = new Set(db.tx.map(t => [t.date, t.type, t.cents, catById(t.cat).name, t.note].join('|')));
+  let added = 0, skipped = 0;
+  rows.forEach(r => {
+    const date = (r[col('date')] || '').trim();
+    const cents = parseAmount(r[col('amount')]);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !cents) { skipped++; return; }
+    const type = /income/i.test(r[col('type')] || '') ? 'income' : 'expense';
+    const catName = (r[col('category')] || 'Other').trim() || 'Other';
+    const note = (r[col('note')] || '').trim();
+    const key = [date, type, cents, catName, note].join('|');
+    if (seen.has(key)) { skipped++; return; }
+    let cat = db.categories.find(c => c.type === type && c.name.toLowerCase() === catName.toLowerCase());
+    if (!cat) { cat = { id: uid(), type, emoji: '🏷️', name: catName }; db.categories.push(cat); }
+    db.tx.push({ id: uid(), created: Date.now() + added, type, cents, cat: cat.id, date, note });
+    seen.add(key); added++;
+  });
+  save(); render();
+  toast(`Imported ${added} record${added === 1 ? '' : 's'}${skipped ? `, skipped ${skipped}` : ''}`);
+});
+
+render();
+
+if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+</script>
+</body>
+</html>
