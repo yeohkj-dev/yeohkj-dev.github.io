@@ -235,7 +235,8 @@
         <p class="sync-status" id="syncStatus"></p>
         <button class="btn" id="syncBtn">Connect Google Drive</button>
         <button class="btn ghost" id="syncOff" hidden>Disconnect</button>
-        <p class="hint">Sign in with the same Gmail on each phone to share your records. They are kept in a private app folder in your own Google Drive.</p>
+        <p class="hint" id="backupStatus" hidden></p>
+        <p class="hint">Sign in with the same Gmail on each phone to share your records. They are kept in a private app folder in your own Google Drive, and a CSV copy is saved to a <b>Pocket Penny Backups</b> folder you can open in Drive. Older copies are cleared weekly, so only the latest is kept.</p>
       </div>
       <div class="card">
         <h2>💾 Backup</h2>
@@ -708,11 +709,14 @@ $('#importFile').addEventListener('change', async e => {
 // ---------- Google Drive sync ----------
 const GOOGLE_CLIENT_ID = '896362873814-ktp80pmbds11q0ccu1cnaer8asejjp9a.apps.googleusercontent.com'; // OAuth client ID (Google Cloud project pocket-penny-514607)
 const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
+const BACKUP_SCOPE = 'https://www.googleapis.com/auth/drive.file'; // only files this app creates
+const BACKUP_FOLDER = 'Pocket Penny Backups';
+const BACKUP_CLEAN_EVERY = 7 * 24 * 60 * 60 * 1000;
 const DRIVE_FILE = 'pocket-penny-data.json';
 const SYNC_KEY = 'pocketPenny.sync';
 let sync = {};
 try { sync = JSON.parse(localStorage.getItem(SYNC_KEY)) || {}; } catch (e) {}
-let syncRunning = false, syncAgain = false, syncTimer = null, syncError = '', tokenClient = null;
+let syncRunning = false, syncAgain = false, syncTimer = null, syncError = '', backupError = '', tokenClient = null;
 
 function persistSync() {
   try { localStorage.setItem(SYNC_KEY, JSON.stringify(sync)); } catch (e) {}
@@ -765,6 +769,57 @@ async function uploadDriveFile(fileId, body) {
   form.append('file', new Blob([body], { type: 'application/json' }));
   await drive('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', { method: 'POST', body: form });
 }
+// Daily CSV copy in a normal Drive folder, rewritten only when the records change.
+function textHash(text) {
+  let h = 5381;
+  for (let i = 0; i < text.length; i++) h = (h * 33 + text.charCodeAt(i)) | 0;
+  return String(h);
+}
+async function findBackupFile(name, parent) {
+  const q = [`name='${name}'`, 'trashed=false', parent ? `'${parent}' in parents` : `mimeType='application/vnd.google-apps.folder'`].join(' and ');
+  const res = await drive(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)`);
+  return (await res.json()).files[0];
+}
+async function backupToDrive() {
+  if (!sync.backup || !db.tx.length) return;
+  const csv = buildCsv(db.tx);
+  const hash = textHash(csv);
+  const name = `Pocket Penny ${isoDate(new Date())}.csv`;
+  if (sync.backupHash === hash && sync.backupName === name) return;
+  let folder = await findBackupFile(BACKUP_FOLDER);
+  if (!folder) {
+    const res = await drive('https://www.googleapis.com/drive/v3/files?fields=id', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: BACKUP_FOLDER, mimeType: 'application/vnd.google-apps.folder' }),
+    });
+    folder = await res.json();
+  }
+  const existing = await findBackupFile(name, folder.id);
+  if (existing) {
+    await drive(`https://www.googleapis.com/upload/drive/v3/files/${existing.id}?uploadType=media`, { method: 'PATCH', headers: { 'Content-Type': 'text/csv' }, body: csv });
+  } else {
+    const form = new FormData();
+    form.append('metadata', new Blob([JSON.stringify({ name, parents: [folder.id], mimeType: 'text/csv' })], { type: 'application/json' }));
+    form.append('file', new Blob([csv], { type: 'text/csv' }));
+    await drive('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', { method: 'POST', body: form });
+  }
+  Object.assign(sync, { backupHash: hash, backupName: name, backupAt: Date.now() });
+  persistSync();
+  await cleanOldBackups(folder.id, name);
+}
+// Once a week, move every older backup to Drive's bin so only the newest copy is kept.
+async function cleanOldBackups(folderId, keepName) {
+  if (Date.now() - (sync.cleanedAt || 0) < BACKUP_CLEAN_EVERY) return;
+  const q = encodeURIComponent(`'${folderId}' in parents and trashed=false`);
+  const res = await drive(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)`);
+  for (const f of (await res.json()).files) {
+    if (f.name === keepName) continue;
+    await drive(`https://www.googleapis.com/drive/v3/files/${f.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trashed: true }) });
+  }
+  sync.cleanedAt = Date.now();
+  persistSync();
+}
+
 async function syncNow() {
   if (syncRunning) { syncAgain = true; return; }
   if (!tokenValid()) { renderSync(); return; }
@@ -786,6 +841,8 @@ async function syncNow() {
     if (body !== remoteText) await uploadDriveFile(file && file.id, body);
     sync.last = Date.now();
     persistSync();
+    try { await backupToDrive(); backupError = ''; }
+    catch (e) { backupError = e.message; } // a failed backup never stops sync
   } catch (e) {
     syncError = e.message;
   }
@@ -809,6 +866,14 @@ function renderSync() {
   else if (expired) status = 'Tap Sync now to sign in again';
   else if (sync.connected && sync.last) status = 'Last synced ' + new Date(sync.last).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
   $('#syncStatus').textContent = status;
+  let backup = '';
+  if (configured && sync.connected) {
+    if (!sync.backup) backup = '📁 Backup is off. Tap Sync now and allow Pocket Penny to save files in your Drive to turn it on.';
+    else if (backupError) backup = `📁 Backup failed: ${backupError}`;
+    else if (sync.backupAt) backup = `📁 Last backup: ${sync.backupName} in “${BACKUP_FOLDER}”`;
+  }
+  $('#backupStatus').textContent = backup;
+  $('#backupStatus').hidden = !backup;
   $('#syncBtn').hidden = !configured;
   $('#syncBtn').textContent = sync.connected ? 'Sync now' : 'Connect Google Drive';
   $('#syncOff').hidden = !configured || !sync.connected;
@@ -820,10 +885,13 @@ function requestToken() {
   if (!tokenClient) {
     tokenClient = google.accounts.oauth2.initTokenClient({
       client_id: GOOGLE_CLIENT_ID,
-      scope: DRIVE_SCOPE,
+      scope: `${DRIVE_SCOPE} ${BACKUP_SCOPE}`,
       callback: res => {
         if (res.error) { syncError = res.error; renderSync(); return; }
-        Object.assign(sync, { connected: true, token: res.access_token, expires: Date.now() + res.expires_in * 1000 });
+        Object.assign(sync, {
+          connected: true, token: res.access_token, expires: Date.now() + res.expires_in * 1000,
+          backup: google.accounts.oauth2.hasGrantedAllScopes(res, BACKUP_SCOPE),
+        });
         persistSync();
         syncNow();
       },
@@ -833,7 +901,7 @@ function requestToken() {
   tokenClient.requestAccessToken({ prompt: sync.connected ? '' : 'consent' });
 }
 function startSync() {
-  if (tokenValid()) syncNow();
+  if (tokenValid() && sync.backup) syncNow();
   else requestToken();
 }
 $('#syncBtn').addEventListener('click', startSync);
